@@ -138,7 +138,8 @@ class TestControllerBlock(object):
         assert pyo.value(pred_obj_expr) == pyo.value(obj_expr)
         assert pred_obj_expr.to_string() == obj_expr.to_string()
 
-        controller.del_component(controller.setpoint_objective)
+        # Because now can change the setpoint, test should pass without this line.
+        # controller.del_component(controller.setpoint_objective)
 
         setpoint = [
                 (controller.mod.flow_in[t0], 3.0),
@@ -172,12 +173,16 @@ class TestControllerBlock(object):
         controller.add_setpoint_objective(setpoint, weights)
         controller.mod.flow_in[:].set_value(3.0)
         initialize_t0(controller.mod)
+        
+        # It should work even if the tracking objective exists and is active.
+        controller.tracking_objective = pyo.Objective(expr = 0.0)
 
         dof_prior = degrees_of_freedom(controller)
         controller.solve_setpoint(solver, require_steady=True)
         dof_post = degrees_of_freedom(controller)
 
         assert dof_prior == dof_post
+        assert controller.tracking_objective.active
 
         assert controller.differential_vars[0].setpoint == \
                 pytest.approx(3.75, abs=1e-3)
@@ -305,6 +310,10 @@ class TestControllerBlock(object):
                 )
         assert pyo.value(controller.tracking_objective.expr == pred_obj[3])
         assert pyo.value(controller.tracking_objective.expr) > 0
+        
+        # This shold work even if the controller block has alreay had the 
+        # tracking objective.
+        controller.add_setpoint_objective(setpoint, weights)
 
     @pytest.mark.unit
     def test_constrain_control_inputs_piecewise_constant(self):
@@ -387,3 +396,6 @@ class TestControllerBlock(object):
 
         assert controller.vectors.differential[0, t0].value == 13.
         assert controller.vectors.differential[1, t0].value == 23.
+        
+abc = TestControllerBlock()
+abc.test_solve_setpoint_steady()
