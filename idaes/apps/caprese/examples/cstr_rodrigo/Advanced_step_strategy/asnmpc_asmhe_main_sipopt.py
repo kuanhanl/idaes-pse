@@ -11,19 +11,26 @@
 # at the URL "https://github.com/IDAES/idaes-pse".
 ##############################################################################
 """
-Example for Caprese's module for NMPC/MHE.
+Example for Caprese's module for NMPC/MHE with advanced step strategy.
+Sensitivity solver: sipopt.
+
+The main idea of advanced step strategy is solving the optimization problems
+with predicted measurements and estimates during the offline period, which is
+the period when waiting for the next state of plant. Once the real state is 
+available, estimates and control inputs are updated quickly base on NLP sensitivity.
+
 """
+
 import random
 from idaes.apps.caprese.dynamic_builder import DynamicSim
 from idaes.apps.caprese.util import apply_noise_with_bounds
 from pyomo.environ import SolverFactory, Reference
 from pyomo.dae.initialization import solve_consistent_initial_conditions
 # import idaes.logger as idaeslog
-from cstr_rodrigo_model import make_model
+from idaes.apps.caprese.examples.cstr_rodrigo.cstr_rodrigo_model import make_model
 from idaes.apps.caprese.data_manager import DynamicDataManager
 
 __author__ = "Kuan-Han Lin"
-
 
 
 # See if ipopt is available and set up solver
@@ -37,12 +44,21 @@ if SolverFactory('ipopt').available():
             }
 else:
     solver = None
+    
+# Specify sensitivity solver, which can be either 'sipopt' or 'k_aug'
+if SolverFactory("ipopt_sens").available():
+    ipopt_sens = SolverFactory("ipopt_sens", solver_io = "nl")
+    ipopt_sens.options['run_sens'] = "yes"
+else:
+    ipopt_sens = None
+    
 
 def main():
     m_estimator = make_model(horizon=10., ntfe=10, ntcp=2, bounds=True)
     m_controller = make_model(horizon=10, ntfe=5, ntcp=2, bounds=True)
     sample_time = 2.
     m_plant = make_model(horizon=sample_time, ntfe=2, ntcp=2, bounds = True)
+    m_predictor = make_model(horizon=sample_time, ntfe=2, ntcp=2, bounds=True)
     time_plant = m_plant.t
 
     simulation_horizon = 20
@@ -58,7 +74,6 @@ def main():
             ]
     measurements = [
             m_plant.Tall[0, "T"],
-            # m_plant.Tall[0, "Tj"],
             m_plant.Ca[0],
             ]
     
@@ -66,6 +81,8 @@ def main():
     dyna = DynamicSim(
             plant_model = m_plant,
             plant_time_set = m_plant.t,
+            predictor_model = m_predictor,
+            predictor_time_set = m_predictor.t, 
             estimator_model = m_estimator, 
             estimator_time_set = m_estimator.t,
             controller_model = m_controller, 
@@ -73,16 +90,20 @@ def main():
             inputs_at_t0 = inputs,
             measurements_at_t0 = measurements,
             sample_time = sample_time,
+            as_strategy = True,
             )
 
     plant = dyna.plant
+    predictor = dyna.predictor
     estimator = dyna.estimator
     controller = dyna.controller
     
     p_t0 = dyna.plant.time.first()
+    pred_t0 = dyna.predictor.time.first()
     e_t0 = dyna.estimator.time.first()
     c_t0 = dyna.controller.time.first()
     p_ts = dyna.plant.sample_points[1]
+    pred_ts = dyna.predictor.sample_points[1]
     e_ts = dyna.estimator.sample_points[1]
     c_ts = dyna.controller.sample_points[1]
     
@@ -100,9 +121,12 @@ def main():
                                    user_interested_states = states_of_interest,
                                    user_interested_inputs = inputs_of_interest,)
     #--------------------------------------------------------------------------
+    
     # Plant setup
     solve_consistent_initial_conditions(plant, plant.time, solver)
     
+    # Predictor setup
+    solve_consistent_initial_conditions(predictor, predictor.time, solver)
 
     # Controller setup
     solve_consistent_initial_conditions(controller, controller.time, solver)
@@ -127,6 +151,10 @@ def main():
     
     dyna.controller.initialize_to_initial_conditions()
     
+    # Set up the advanced step strategy for controller
+    dyna.controller.NMPC_advanced_strategy_setup(method = "sipopt",
+                                                 ipopt_sens_solver = ipopt_sens,)
+    
     # Set up input noises that will be applied to control inputs
     variance = [
         (plant.mod.Tjinb[0], 0.01),
@@ -136,7 +164,6 @@ def main():
     input_noise_bounds = [(var[p_t0].lb, var[p_t0].ub) for var in plant.input_vars]
     #--------------------------------------------------------------------------
 
-    
     # Estimator setup
     # Here we solve for a steady state and use it to fill in past measurements
     desired_ss = [(estimator.mod.Ca[0], 0.021)]
@@ -158,6 +185,10 @@ def main():
     dyna.estimator.add_noise_minimize_objective(model_disturbance_weights,
                                                 measurement_noise_weights)
     
+    # Set up the advanced step strategy for estimator
+    dyna.estimator.MHE_advanced_strategy_setup(method = "sipopt",
+                                               ipopt_sens_solver = ipopt_sens,)
+
     # Set up measurement noises that will be applied to measurements
     variance = [
         (dyna.estimator.mod.Tall[0, "T"], 0.05),
@@ -170,81 +201,105 @@ def main():
             ]
     random.seed(246)
     #--------------------------------------------------------------------------
-
-    dyna_data.save_initial_plant_data()    
-
-    # Solve the first control problem
+    
+    # [OFFLINE] Solve the first control problem
     dyna.controller.vectors.input[...].unfix()
     dyna.controller.vectors.input[:,0].fix()
     solver.solve(dyna.controller, tee=True)
     dyna_data.save_controller_data(iteration = 0)
     
-    # Extract inputs from controller and inject them into plant
-    inputs = controller.generate_inputs_at_time(c_ts)
-    plant.inject_inputs(inputs)
+    unnoised_inputs = controller.generate_inputs_at_time(c_ts)
+    noised_inputs = apply_noise_with_bounds(
+                    unnoised_inputs,
+                    input_variance,
+                    random.gauss,
+                    input_noise_bounds,
+                    )
     
-    # This "initialization" really simulates the plant with the new inputs.
-    dyna.plant.initialize_by_solving_elements(solver)
-    dyna.plant.vectors.input[...].fix() #Fix the input to solve the plant
-    solver.solve(dyna.plant, tee = True)
-    dyna_data.save_plant_data(iteration = 0)
+    dyna_data.save_initial_plant_data()
     
-    # Extract measurements from the plant and inject them into MHE
-    measurements = dyna.plant.generate_measurements_at_time(p_ts)
-    dyna.estimator.load_measurements(measurements,
-                                     target = "actualmeasurement",
-                                     timepoint = estimator.time.last())
-    dyna.estimator.load_inputs_for_MHE(inputs)
-    
-    # Solve the first estimation problem
-    dyna.estimator.check_var_con_dof(skip_dof_check = False)
-    solver.solve(dyna.estimator, tee=True)
-    dyna_data.save_estimator_data(iteration = 0)
-    
-    for i in range(1, 11):
-        print('\nENTERING MHE LOOP ITERATION %s\n' % i)
+    for i in range(0,11):
+        print('\nENTERING DYNAMIC LOOP ITERATION %s\n' % i)
         
-        estimates = dyna.estimator.generate_estimates_at_time(estimator.time.last())
-
-        dyna.controller.advance_one_sample()
-        dyna.controller.load_initial_conditions(estimates)    
-    
-        solver.solve(dyna.controller, tee = True)
-        dyna_data.save_controller_data(iteration = i)
-
-        dyna.plant.advance_one_sample()
-        dyna.plant.initialize_to_initial_conditions()
-        inputs = controller.generate_inputs_at_time(c_ts)
-        inputs = apply_noise_with_bounds(
-                inputs,
-                input_variance,
-                random.gauss,
-                input_noise_bounds,
-                )
-        plant.inject_inputs(inputs)
+        if i > 0:
+            # [ONLINE] Update control inputs based on real estimates
+            dyna.controller.NMPC_sensitivity_update(real_estimates, tee=True)
+            dyna_data.save_controller_data(iteration = i)
+            
+            unnoised_inputs = controller.generate_inputs_at_time(c_ts)
+            noised_inputs = apply_noise_with_bounds(
+                        unnoised_inputs,
+                        input_variance,
+                        random.gauss,
+                        input_noise_bounds,
+                        )
+            
+            dyna.plant.advance_one_sample()
+            dyna.plant.initialize_to_initial_conditions()            
+            
+        # [ONLINE] Inject updated inputs into the plant
+        dyna.plant.inject_inputs(noised_inputs)
         
+        # [ONLINE] Plant moves one sample time forward
         dyna.plant.initialize_by_solving_elements(solver)
         dyna.plant.vectors.input[...].fix() #Fix the input to solve the plant
         solver.solve(dyna.plant, tee = True)    
-        dyna_data.save_plant_data(iteration = i)
-    
-        measurements = dyna.plant.generate_measurements_at_time(p_ts)
-        measurements = apply_noise_with_bounds(
-                    measurements,
-                    measurement_variance,
-                    random.gauss,
-                    measurement_noise_bounds,
-                    )
-        dyna.estimator.advance_one_sample()
-        dyna.estimator.load_measurements(measurements,
+        dyna_data.save_plant_data(iteration = i)        
+        
+        # Run the following offline process during the plant evolution.
+        ##### [START OF OFFLINE PROCESS] #####################################
+        # Predict the next measurement with predictor
+        if i > 0:
+            dyna.predictor.advance_one_sample()
+            dyna.predictor.initialize_to_initial_conditions()
+        
+        # Predictor doesn't know the noises on inputs
+        dyna.predictor.inject_inputs(unnoised_inputs)
+        
+        # Solve the predicitor with the current control input
+        dyna.predictor.initialize_by_solving_elements(solver)
+        dyna.predictor.vectors.input[...].fix() #Fix the input to solve the predictor
+        solver.solve(dyna.predictor, tee = True)
+        
+        pre_measurements = dyna.predictor.generate_measurements_at_time(pred_ts)  
+        
+        # Solve MHE with predicted measurements
+        if i > 0:
+            dyna.estimator.advance_one_sample()
+        dyna.estimator.load_measurements(pre_measurements,
                                          target = "actualmeasurement",
                                          timepoint = estimator.time.last())
-        dyna.estimator.load_inputs_for_MHE(inputs)
+        # MHE also doesn't knwo the noises on inputs
+        dyna.estimator.load_inputs_for_MHE(unnoised_inputs)
         
         dyna.estimator.check_var_con_dof(skip_dof_check = False)
         solver.solve(dyna.estimator, tee = True)
-        dyna_data.save_estimator_data(iteration = i)
         
+        pred_estimates = dyna.estimator.generate_estimates_at_time(estimator.time.last())
+        
+        # Solve NMPC with predicted estimates
+        dyna.controller.advance_one_sample()
+        dyna.controller.load_initial_conditions(pred_estimates)    
+    
+        solver.solve(dyna.controller, tee = True)
+        ##### [END OF OFFLINE PROCESS] #######################################
+        
+        # [ONLINE] Get the real measurements from the plant
+        real_measurements = dyna.plant.generate_measurements_at_time(p_ts)
+        noised_measurements = apply_noise_with_bounds(
+                        real_measurements,
+                        measurement_variance,
+                        random.gauss,
+                        measurement_noise_bounds,
+                        )
+            
+        # [ONLINE] Update estimates with real and noised measurements
+        dyna.estimator.MHE_sensitivity_update(noised_measurements, tee = True)
+        dyna_data.save_estimator_data(iteration = i)            
+
+        real_estimates = dyna.estimator.generate_estimates_at_time(estimator.time.last())
+
+
     dyna_data.plot_setpoint_tracking_results(states_of_interest)
     dyna_data.plot_control_input(inputs_of_interest)
     dyna_data.plot_estimation_results(states_of_interest)

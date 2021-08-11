@@ -19,11 +19,10 @@ from idaes.apps.caprese.util import apply_noise_with_bounds
 from pyomo.environ import SolverFactory, Reference
 from pyomo.dae.initialization import solve_consistent_initial_conditions
 # import idaes.logger as idaeslog
-from cstr_rodrigo_model import make_model
+from idaes.apps.caprese.examples.cstr_rodrigo.cstr_rodrigo_model import make_model
 from idaes.apps.caprese.data_manager import EstimatorDataManager
 
 __author__ = "Kuan-Han Lin"
-
 
 
 # See if ipopt is available and set up solver
@@ -58,7 +57,6 @@ def main():
             ]
     measurements = [
             m_plant.Tall[0, "T"],
-            # m_plant.Tall[0, "Tj"],
             m_plant.Ca[0],
             ]
     
@@ -77,9 +75,9 @@ def main():
     estimator = mhe.estimator
     
     p_t0 = mhe.plant.time.first()
-    c_t0 = mhe.estimator.time.first()
+    e_t0 = mhe.estimator.time.first()
     p_ts = mhe.plant.sample_points[1]
-    c_ts = mhe.estimator.sample_points[1]
+    e_ts = mhe.estimator.sample_points[1]
     #--------------------------------------------------------------------------
     # Declare variables of interest for plotting.
     # It's ok not declaring anything. The data manager will still save some 
@@ -89,8 +87,8 @@ def main():
 
     # Set up data manager to save estimation data
     data_manager = EstimatorDataManager(plant, 
-                                       estimator,
-                                       states_of_interest,)
+                                        estimator,
+                                        states_of_interest,)
     #--------------------------------------------------------------------------
     solve_consistent_initial_conditions(plant, plant.time, solver)
     
@@ -100,27 +98,30 @@ def main():
     mhe.estimator.initialize_past_info_with_steady_state(desired_ss, ss_weights, solver)
         
     # Now we are ready to construct the objective function for MHE
-    model_disturbance_variances = [
+    model_disturbance_weights = [
             (estimator.mod.Ca[0], 1.),
             (estimator.mod.Tall[0, "T"], 1.),
             (estimator.mod.Tall[0, "Tj"], 1.),
             ]
 
-    measurement_noise_variances = [
-            (mhe.estimator.mod.Tall[0, "T"], 0.05),
-            (mhe.estimator.mod.Ca[0], 1.0E-2),
-            ]  
+    measurement_noise_weights = [
+            (estimator.mod.Ca[0], 100.),
+            (estimator.mod.Tall[0, "T"], 20.),
+            ]   
     
-    mhe.estimator.add_noise_minimize_objective(model_disturbance_variances,
-                                               measurement_noise_variances,
-                                               givenform = "variance")
+    mhe.estimator.add_noise_minimize_objective(model_disturbance_weights,
+                                               measurement_noise_weights)
     
     #-------------------------------------------------------------------------
     # Set up measurement noises that will be applied to measurements
-    mhe.estimator.set_variance(measurement_noise_variances)
+    variance = [
+        (mhe.estimator.mod.Tall[0, "T"], 0.05),
+        (mhe.estimator.mod.Ca[0], 1.0E-2),
+        ]
+    mhe.estimator.set_variance(variance)
     measurement_variance = [v.variance for v in estimator.measurement_vars]
     measurement_noise_bounds = [
-            (var[c_t0].lb, var[c_t0].ub) for var in estimator.measurement_vars
+            (var[e_t0].lb, var[e_t0].ub) for var in estimator.measurement_vars
             ]
     #-------------------------------------------------------------------------
     
