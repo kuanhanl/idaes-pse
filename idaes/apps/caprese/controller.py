@@ -52,6 +52,12 @@ from pyomo.core.base.range import remainder
 from pyomo.dae.set_utils import deactivate_model_at
 from pyomo.dae.flatten import flatten_dae_components
 from pyomo.core.base.indexed_component import UnindexedComponent_set
+from idaes.apps.caprese.advanced_strategy_toolbox import (
+        advanced_strategy_setup,
+        calculate_sensitivity,
+        sensitivity_update,
+        )
+
 
 
 def pwc_rule(ctrl, i, t):
@@ -101,6 +107,12 @@ class _ControllerBlockData(_DynamicBlockData):
             # the number of differential variables. 
             ics_vector_var = self.vectors.measurement
             ictype = VC.MEASUREMENT
+            
+        # Deactivate the tracking objective if it exists. This is needed when the 
+        # user wants to change the setpoint.
+        if hasattr(self, "tracking_objective"):
+            if self.tracking_objective.active:
+                self.tracking_objective.deactivate()
 
         was_originally_active = ComponentMap([(comp, comp.active) for comp in 
                 model.component_data_objects((Constraint, Block))])
@@ -169,6 +181,11 @@ class _ControllerBlockData(_DynamicBlockData):
             for comp in complist:
                 if was_originally_active[comp]:
                     comp.activate()
+                    
+        # Reactivate tracking objective if it exists
+        if hasattr(self, "tracking_objective"):
+            if not self.tracking_objective.active:
+                self.tracking_objective.activate()
 
         # Fix inputs that were originally fixed
         if VC.INPUT in self.categories:
@@ -220,7 +237,11 @@ class _ControllerBlockData(_DynamicBlockData):
         obj_expr = sum(
             weight_vector[i]*(var - sp)**2 for
             i, (var, sp) in enumerate(setpoint))
-        self.setpoint_objective = Objective(expr=obj_expr)
+        
+        if not hasattr(self, "setpoint_objective"):
+            self.setpoint_objective = Objective(expr=obj_expr)
+        else:
+            self.setpoint_objective.expr = obj_expr
 
     def add_tracking_objective(self,
             weights,
@@ -300,8 +321,11 @@ class _ControllerBlockData(_DynamicBlockData):
                     state_weight*state_term + input_weight*input_term)
         elif control_penalty_type == ControlPenaltyType.NONE:
             obj_expr = objective_weight*state_weight*state_term
-
-        self.tracking_objective = Objective(expr=obj_expr)
+        
+        if not hasattr(self, "tracking_objective"):
+            self.tracking_objective = Objective(expr=obj_expr)
+        else:
+            self.tracking_objective.expr = obj_expr
 
     def constrain_control_inputs_piecewise_constant(self):
         """ Adds an indexed constraint `pwc_constraint` that
@@ -335,6 +359,15 @@ class _ControllerBlockData(_DynamicBlockData):
         ics : list of initial conditions.
         '''
         
+        # If use advanced strategy, initial conditions are loaded to parameters in 
+        # _SENSITIVITY_TOOLBOX_DATA. Thus, the type of ics has alreay been determined
+        # when setting up the sensitivity.
+        if hasattr(self, "as_strategy") and  self.as_strategy:
+            sens_data_list = self.sens.block._sens_data_list
+            for (_, param, _, _,), ic_val in zip(sens_data_list, ics):
+                param.value = ic_val
+            return #early return
+                
         if type_of_ics is None:
             print("Loading type of initial conditions is not declared. \n"
                   "Determine the type by checking whether MHE exists or not.")
@@ -351,11 +384,42 @@ class _ControllerBlockData(_DynamicBlockData):
                                    timepoint = self.time.first())                     
         else:
             raise RuntimeError("Declared type of initial conditions does not support."
-                               "Please use either 'measurement' or 'estimate'.")            
+                               "Please use either 'measurement' or 'estimate'.")    
+            
+    def NMPC_advanced_strategy_setup(self, 
+                                     method,
+                                     k_aug_solver = None,
+                                     dot_sens_solver = None,
+                                     ipopt_sens_solver = None,
+                                     ):
         
+        t0 = self.time.first()
+        if self.estimator_is_existing:
+            paramlist = [vart0 for vart0 in self.vectors.differential[:, t0]]
+        else:
+            paramlist = [vart0 for vart0 in self.vectors.measurement[:, t0]]
+            
+        advanced_strategy_setup(self, 
+                                paramlist,
+                                method,
+                                k_aug_solver,
+                                dot_sens_solver,
+                                ipopt_sens_solver,)
         
-
-
+    def NMPC_sensitivity_update(self,
+                                real_state,
+                                tee = True,):
+        
+        sensitivity_update(self, real_state, tee)
+        
+        # Becuase sipopt won't load the result to the components, we need to         
+        # load it manually.
+        time_subset = self.time.ordered_data()[1:] #skip the very first one, which is fixed.
+        if self.sens_method == "sipopt":
+            for tp in time_subset:
+                for input_tp in self.vectors.input[:, tp]:
+                    input_tp.value = self.sens_sol_state_1[input_tp]
+            
 class ControllerBlock(DynamicBlock):
     """ This is a user-facing class to be instantiated when one
     wants to work with a block capable of the methods of

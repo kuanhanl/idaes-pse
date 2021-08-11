@@ -26,6 +26,7 @@ from idaes.apps.caprese.dynamic_block import DynamicBlock
 from idaes.apps.caprese.controller import ControllerBlock
 from idaes.apps.caprese.estimator import EstimatorBlock
 from idaes.apps.caprese.common.config import VariableCategory as VC
+from pyomo.contrib.sensitivity_toolbox.sens import SensitivityInterface as SensInt
 
 __author__ = "Robert Parker, David Thierry, and Kuan-Han Lin"
 
@@ -48,7 +49,11 @@ class DynamicSim(object):
                  controller_time_set = None,
                  inputs_at_t0 = None,
                  measurements_at_t0 = None,
-                 sample_time = None,):
+                 sample_time = None,
+                 as_strategy = False,
+                 predictor_model = None,
+                 predictor_time_set = None,
+                 ):
         
         self.input_cuids = [
                             ComponentUID(
@@ -64,6 +69,7 @@ class DynamicSim(object):
         self.plant_is_existing = False
         self.estimator_is_existing = False
         self.controller_is_existing = False
+        self.predictor_is_existing = False
         
         #----------------------------------------------------------------------                
         if plant_model:
@@ -109,7 +115,9 @@ class DynamicSim(object):
     
             if sample_time is not None:
                 self.estimator.set_sample_time(sample_time)
-        
+                
+            if as_strategy:
+                self.estimator.as_strategy = True
         
         #----------------------------------------------------------------------
         if controller_model:
@@ -139,7 +147,33 @@ class DynamicSim(object):
                 self.controller.estimator_is_existing = True
             else:
                 self.controller.estimator_is_existing = False
-    
+                
+            if as_strategy:
+                self.controller.as_strategy = True
+                
+        #----------------------------------------------------------------------
+        if as_strategy:
+            if predictor_model:
+                self.predictor_is_existing = True
+                # Capture vars in estimator model
+                predictor_inputs_t0 = use_CUID_to_capture_vars_t0_in_given_model(self.input_cuids,
+                                                                                 predictor_time_set.first(),
+                                                                                 predictor_model,)
+                predictor_measurements_t0 = use_CUID_to_capture_vars_t0_in_given_model(self.measurement_cuids,
+                                                                                       predictor_time_set.first(),
+                                                                                       predictor_model,)
+                    
+                self.predictor = DynamicBlock(
+                        model=predictor_model,
+                        time=predictor_time_set,
+                        inputs=predictor_inputs_t0,
+                        measurements=predictor_measurements_t0,
+                        )
+                self.predictor.construct()
+                
+                if sample_time is not None:
+                    self.predictor.set_sample_time(sample_time)
+
     
         if sample_time is not None:
             self.sample_time = sample_time

@@ -51,7 +51,7 @@ from pyomo.environ import (
         ComponentUID,
         Suffix,
         )
-from pyomo.core.base.util import Initializer, ConstantInitializer
+from pyomo.core.base.initializer import Initializer
 from pyomo.core.base.block import _BlockData, SubclassOf
 from pyomo.core.base.indexed_component import UnindexedComponent_set
 from pyomo.common.collections import ComponentMap
@@ -591,6 +591,16 @@ class _DynamicBlockData(_BlockData):
         (This one provides the choices of desired vars and timepoint 
          to load the measurements to. It works for both MHE and NMPC.)
         '''
+        
+        # If advanced step strategy is used, measurements are the perturbed 
+        # parameters and they should be loaded to parameters in _SENSITIVITY_TOOLBOX_DATA 
+        # block.
+        if hasattr(self, "as_strategy") and self.as_strategy:
+            sens_data_list = self.sens.block._sens_data_list
+            for val, (_, meas_param, _, _) in zip(measured, sens_data_list):
+                meas_param.value = val
+            return #early return
+        
         time = self.time
             
         if target is None:

@@ -63,6 +63,11 @@ from pyomo.dae.flatten import (
 from pyomo.core.base.indexed_component import UnindexedComponent_set
 from pyomo.dae.contset import ContinuousSet
 from pyomo.dae.set_utils import deactivate_model_at
+from idaes.apps.caprese.advanced_strategy_toolbox import (
+        advanced_strategy_setup,
+        calculate_sensitivity,
+        sensitivity_update,
+        )
 
 
 MHE_CATEGORY_TYPE_MAP = {
@@ -664,6 +669,35 @@ class _EstimatorBlockData(_DynamicBlockData):
     def generate_estimates_at_time(self, t):
         return [val for val in self.vectors.differential[:, t].value]
                     
+    def MHE_advanced_strategy_setup(self,
+                                    method,
+                                    k_aug_solver = None,
+                                    dot_sens_solver = None,
+                                    ipopt_sens_solver = None,
+                                    ):
+        
+        tlast = self.time.last()
+        paramlist = [var_tlast 
+                     for var_tlast in self.vectors.actualmeasurement[:, tlast]]
+        
+        advanced_strategy_setup(self,
+                                paramlist,
+                                method,
+                                k_aug_solver,
+                                dot_sens_solver,
+                                ipopt_sens_solver,)
+
+    def MHE_sensitivity_update(self,
+                               real_measurements,
+                               tee = True):
+        sensitivity_update(self, real_measurements, tee)
+        
+        # Because sipopt will not load the solution to the components, we need 
+        # to load it manually.
+        tlast = self.time.last()
+        if self.sens_method == "sipopt":
+            for var_tlast in self.vectors.differential[:, tlast]:
+                var_tlast.value = self.sens_sol_state_1[var_tlast]
 
 class EstimatorBlock(DynamicBlock):
     """ This is a user-facing class to be instantiated when one
