@@ -25,6 +25,16 @@ def advanced_strategy_setup(blockitem,
                             dot_sens_solver = None,
                             ipopt_sens_solver = None,
                             ):
+    '''
+    Create sensitivity interface and set up parameters that will be perturbed.
+    Also, make sure sensitivity solver exists and has the correct options.
+
+    Parameters
+    ----------
+    blockitem : Controller block or estimator block.
+    paramlist : A list of fixed variables/parameters that will be perturbed.
+
+    '''
     
     blockitem.sens = SensInt(blockitem, clone_model = False)
     blockitem.sens.setup_sensitivity(paramlist)
@@ -50,7 +60,9 @@ def advanced_strategy_setup(blockitem,
             blockitem.dot_sens = dot_sens_solver
             if "dsdp_mode" not in blockitem.dot_sens.options:
                 blockitem.dotsens.options['dsdp_mode'] = ""
-                
+        
+        # This k_aug interface will save all the output files, instead of 
+        # messing up the current directory. This is really nice!
         blockitem.k_aug_interface = K_augInterface(k_aug=blockitem.k_aug, dot_sens=blockitem.dot_sens)                
                 
     elif blockitem.sens_method == "sipopt":
@@ -75,9 +87,14 @@ def sensitivity_update(blockitem,
                        perturblist,
                        tee = True):
     
+    # I dicided to put this step here for k_aug, so not matter which solver
+    # the user uses, he/she can just follow the exactly same procedure.
+    # However, calculating the sensitivity matrix should be in the "OFFLINE"
+    # processs in order to save more time for the "ONLINE" process.
     if blockitem.sens_method == "k_aug":
         calculate_sensitivity(blockitem, tee)
     
+    # Declare the values of fixed variables after perturbation.
     blockitem.sens.perturb_parameters(perturblist)
     
     if blockitem.sens_method == "k_aug":
