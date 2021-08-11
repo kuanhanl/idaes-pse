@@ -392,6 +392,10 @@ class _ControllerBlockData(_DynamicBlockData):
                                      dot_sens_solver = None,
                                      ipopt_sens_solver = None,
                                      ):
+        '''
+        This function set up necessary components of sensitivitiy calculation 
+        for NMPC.
+        '''
         
         t0 = self.time.first()
         if self.estimator_is_existing:
@@ -414,11 +418,12 @@ class _ControllerBlockData(_DynamicBlockData):
         
         # Becuase sipopt won't load the result to the components, we need to         
         # load it manually.
-        time_subset = self.time.ordered_data()[1:] #skip the very first one, which is fixed.
+        time_subset = self.time.ordered_data()[1:] #skip the very first time point, which is fixed.
         if self.sens_method == "sipopt":
             for tp in time_subset:
                 for input_tp in self.vectors.input[:, tp]:
                     input_tp.value = self.sens_sol_state_1[input_tp]
+        
             
 class ControllerBlock(DynamicBlock):
     """ This is a user-facing class to be instantiated when one
