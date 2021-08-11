@@ -173,6 +173,10 @@ class DynamicSim(object):
                 
                 if sample_time is not None:
                     self.predictor.set_sample_time(sample_time)
+                    
+            else:
+                raise RuntimeError("Advanced step strategy is activated but the"
+                                   "model for predictor is not given.")
 
     
         if sample_time is not None:

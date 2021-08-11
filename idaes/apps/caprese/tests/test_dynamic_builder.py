@@ -227,3 +227,64 @@ class TestDynamicBuilder(object):
         assert all(not vart0.fixed 
                    for vart0 in dyna.controller.vectors.measurement[:, c_t0])
         assert all(dyna.controller.vectors.differential[:, c_t0].fixed)
+        
+    
+    @pytest.mark.unit
+    def test_DynamicSim_case4(self):
+        '''
+        Case 5: plant, controller, and estimator exist with advanced step strategy.
+        
+        '''
+        
+        sample_time = 0.5
+        p_mod = make_model(horizon = sample_time, nfe = 2)
+        p_time = p_mod.time
+        t0 = p_time.first()
+        inputs = [p_mod.flow_in[t0]]
+        measurements = [p_mod.flow_out[t0]]                
+
+        pre_mod = make_model(horizon = sample_time, nfe = 2)
+        pre_time = pre_mod.time
+
+        c_mod = make_model(horizon = 2, nfe = 8)
+        c_time = c_mod.time    
+        
+        e_mod = make_model(horizon = 2.5, nfe = 5)
+        e_time = e_mod.time
+    
+        dyna = DynamicSim(plant_model = p_mod,
+                          plant_time_set = p_time,
+                          predictor_model = pre_mod,
+                          predictor_time_set = pre_time,
+                          controller_model = c_mod,
+                          controller_time_set = c_time,
+                          estimator_model = e_mod,
+                          estimator_time_set = e_time,
+                          inputs_at_t0 = inputs,
+                          measurements_at_t0 = measurements,
+                          sample_time = sample_time,
+                          as_strategy = True,)
+    
+        assert type(dyna) is DynamicSim
+        assert dyna.plant_is_existing
+        assert dyna.controller_is_existing
+        assert dyna.controller.estimator_is_existing
+        assert dyna.estimator_is_existing
+        assert dyna.predictor_is_existing
+        
+        assert dyna.controller.as_strategy
+        assert dyna.estimator.as_strategy
+        
+        assert hasattr(dyna, "plant")
+        assert hasattr(dyna, "controller")
+        assert hasattr(dyna, "estimator")
+        assert hasattr(dyna, "predictor")
+        assert hasattr(dyna.plant, "sample_points")
+        assert dyna.plant.sample_points == [0, 0.5]
+        assert hasattr(dyna.estimator, "sample_points")
+        assert dyna.estimator.sample_points == [0.5*i for i in range(0, 6)]
+        assert hasattr(dyna.controller, "sample_points")
+        assert dyna.controller.sample_points == [0.5*i for i in range(0, 5)]
+        assert hasattr(dyna.predictor, "sample_points")
+        assert dyna.predictor.sample_points == [0, 0.5]
+        
