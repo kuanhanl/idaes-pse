@@ -396,6 +396,3 @@ class TestControllerBlock(object):
 
         assert controller.vectors.differential[0, t0].value == 13.
         assert controller.vectors.differential[1, t0].value == 23.
-        
-abc = TestControllerBlock()
-abc.test_solve_setpoint_steady()
