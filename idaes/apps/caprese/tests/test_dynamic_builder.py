@@ -230,7 +230,7 @@ class TestDynamicBuilder(object):
         
     
     @pytest.mark.unit
-    def test_DynamicSim_case4(self):
+    def test_DynamicSim_case5(self):
         '''
         Case 5: plant, controller, and estimator exist with advanced step strategy.
         
