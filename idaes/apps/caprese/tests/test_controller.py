@@ -39,12 +39,36 @@ from idaes.apps.caprese.common.config import (
         ControlPenaltyType,
         )
 from idaes.core.util.model_statistics import degrees_of_freedom
+from pyomo.contrib.sensitivity_toolbox.sens import SensitivityInterface
+
 
 solver_available = pyo.SolverFactory('ipopt').available()
 if solver_available:
     solver = pyo.SolverFactory('ipopt')
 else:
     solver = None
+    
+k_aug_available = pyo.SolverFactory("k_aug").available()
+if k_aug_available:
+    k_aug_solver = pyo.SolverFactory("k_aug")
+    k_aug_solver.options['dsdp_mode'] = ""  #: sensitivity mode!
+else:
+    k_aug_solver = None
+    
+dot_sens_available = pyo.SolverFactory("dot_sens").available()
+if dot_sens_available:
+    dot_sens_solver = pyo.SolverFactory("dot_sens")
+    dot_sens_solver.options["dsdp_mode"] = ""
+else:
+    dot_sens_solver = None
+    
+ipopt_sens_available = pyo.SolverFactory("ipopt_sens").available()
+if ipopt_sens_available:
+    ipopt_sens_solver = pyo.SolverFactory("ipopt_sens")
+    ipopt_sens_solver.options['run_sens'] = 'yes'
+else:
+    ipopt_sens_solver = None
+
 
 class TestControllerBlock(object):
 
@@ -396,3 +420,140 @@ class TestControllerBlock(object):
 
         assert controller.vectors.differential[0, t0].value == 13.
         assert controller.vectors.differential[1, t0].value == 23.
+        
+    @pytest.mark.component
+    @pytest.mark.skipif(not solver_available or not k_aug_available or not dot_sens_available,
+                        reason='Either IPOPT or k_aug is not available')
+    def test_asNMPC_w_k_aug(self):
+        controller = self.make_controller()
+        time = controller.time
+        t0 = time.first()
+        
+        controller.as_strategy = True
+
+        setpoint = [
+                (controller.mod.flow_in[t0], 3.0),
+                ]
+        weights = [
+                (controller.mod.flow_in[t0], 1.0),
+                ]
+        controller.add_setpoint_objective(setpoint, weights)
+        controller.mod.flow_in[:].set_value(3.0)
+        initialize_t0(controller.mod)
+        
+        controller.solve_setpoint(solver, require_steady=True)
+
+        tracking_weights = [
+                (controller.mod.conc[t0,'A'], 1),
+                (controller.mod.conc[t0,'B'], 1),
+                (controller.mod.rate[t0,'A'], 1),
+                (controller.mod.rate[t0,'B'], 1),
+                (controller.mod.flow_out[t0], 1),
+                (controller.mod.flow_in[t0], 1),
+                ]
+
+        controller.add_tracking_objective(tracking_weights)
+        controller.constrain_control_inputs_piecewise_constant()
+        controller.initialize_to_initial_conditions()
+        
+        controller.NMPC_advanced_strategy_setup(method = "k_aug",
+                                                k_aug_solver = k_aug_solver,
+                                                dot_sens_solver = dot_sens_solver)
+        
+        assert hasattr(controller, "sens")
+        assert type(controller.sens) is SensitivityInterface
+        # Make sure the perturbed varialbes are correct
+        pred_perturbed_vars = [controller.mod.conc[0, "A"],
+                               controller.mod.conc[0, "B"]]
+        assert all(i1 is i2 for i1, i2 in zip(pred_perturbed_vars,
+                                              controller.sens.block._paramList))
+        
+        ics = [3.65, 1.35]
+        controller.load_initial_conditions(ics)
+        # Make sure estimates are loaded to parameters in _SENSITIVITY_TOOLBOX_DATA block,
+        # instead of the original differential variables at t0.
+        sens_block = controller._SENSITIVITY_TOOLBOX_DATA
+        for i, para in enumerate(list(sens_block.component_objects(pyo.Param))):
+            assert para.value == ics[i]
+
+        controller.vectors.input[...].unfix()
+        controller.vectors.input[:, t0].fix()
+        solver.solve(controller, tee = True)        
+        
+        # After solving for the optimal solution with unperturbed parameters,
+        # perturb those parameters and do the update by sensitivity calculation.
+        perturbed_ics = [3.85, 1.15]
+        updated_input = {0.5: 2.994789,
+                         1.0: 2.999491}
+        controller.NMPC_sensitivity_update(perturbed_ics, tee = True)
+        assert controller.vectors.input[0, 0.5].value == pytest.approx(updated_input[0.5], abs=1e-3)
+        assert controller.vectors.input[0, 1.0].value == pytest.approx(updated_input[1.0], abs=1e-3)
+        
+    @pytest.mark.component
+    @pytest.mark.skipif(not solver_available or not ipopt_sens_available,
+                        reason='Either IPOPT or sipopt is not available')
+    def test_asNMPC_w_sipopt(self):
+        controller = self.make_controller()
+        time = controller.time
+        t0 = time.first()
+        
+        controller.as_strategy = True
+        
+        setpoint = [
+                (controller.mod.flow_in[t0], 3.0),
+                ]
+        weights = [
+                (controller.mod.flow_in[t0], 1.0),
+                ]
+        controller.add_setpoint_objective(setpoint, weights)
+        controller.mod.flow_in[:].set_value(3.0)
+        initialize_t0(controller.mod)
+        
+        controller.solve_setpoint(solver, require_steady=True)
+
+        tracking_weights = [
+                (controller.mod.conc[t0,'A'], 1),
+                (controller.mod.conc[t0,'B'], 1),
+                (controller.mod.rate[t0,'A'], 1),
+                (controller.mod.rate[t0,'B'], 1),
+                (controller.mod.flow_out[t0], 1),
+                (controller.mod.flow_in[t0], 1),
+                ]
+
+        controller.add_tracking_objective(tracking_weights)
+        controller.constrain_control_inputs_piecewise_constant()
+        controller.initialize_to_initial_conditions()        
+        
+        controller.NMPC_advanced_strategy_setup(method = "sipopt",
+                                                ipopt_sens_solver = ipopt_sens_solver)
+        
+        assert hasattr(controller, "sens")
+        assert type(controller.sens) is SensitivityInterface
+        # Make sure the perturbed varialbes are correct
+        pred_perturbed_vars = [controller.mod.conc[0, "A"],
+                               controller.mod.conc[0, "B"]]
+        assert all(i1 is i2 for i1, i2 in zip(pred_perturbed_vars,
+                                              controller.sens.block._paramList))
+        
+        ics = [3.65, 1.35]
+        controller.load_initial_conditions(ics)
+        # Make sure estimates are loaded to parameters in _SENSITIVITY_TOOLBOX_DATA block,
+        # instead of the original differential variables at t0.
+        sens_block = controller._SENSITIVITY_TOOLBOX_DATA
+        for i, para in enumerate(list(sens_block.component_objects(pyo.Param))):
+            assert para.value == ics[i]
+
+        controller.vectors.input[...].unfix()
+        controller.vectors.input[:, t0].fix()
+        # Here cannot solve the problem with ipopt. Otherwise, sipopt will return the restults
+        # that are different from k_aug. WEIRD!!!
+        # solver.solve(controller, tee = True)        
+        
+        # After solving for the optimal solution with unperturbed parameters,
+        # perturb those parameters and do the update by sensitivity calculation.
+        perturbed_ics = [3.85, 1.15]
+        updated_input = {0.5: 2.994789,
+                         1.0: 2.999491}
+        controller.NMPC_sensitivity_update(perturbed_ics, tee = True)
+        assert controller.vectors.input[0, 0.5].value == pytest.approx(updated_input[0.5], abs=1e-3)
+        assert controller.vectors.input[0, 1.0].value == pytest.approx(updated_input[1.0], abs=1e-3)

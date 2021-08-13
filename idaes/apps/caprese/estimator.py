@@ -694,10 +694,9 @@ class _EstimatorBlockData(_DynamicBlockData):
         
         # Because sipopt will not load the solution to the components, we need 
         # to load it manually.
-        tlast = self.time.last()
         if self.sens_method == "sipopt":
-            for var_tlast in self.vectors.differential[:, tlast]:
-                var_tlast.value = self.sens_sol_state_1[var_tlast]
+            for var in self.vectors.differential[...]:
+                var.value = self.sens_sol_state_1[var]
 
 class EstimatorBlock(DynamicBlock):
     """ This is a user-facing class to be instantiated when one

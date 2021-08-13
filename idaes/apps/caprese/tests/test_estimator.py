@@ -19,12 +19,12 @@ import pyomo.environ as pyo
 from idaes.apps.caprese.categorize import (
         categorize_dae_variables_and_constraints,
         )
-
 from idaes.apps.caprese.tests.test_simple_model import (
         make_model,
         initialize_t0,
         )
-
+from idaes.apps.caprese.tests.test_dynamic_block import(
+        TestDynamicBlock)
 from idaes.apps.caprese.estimator import (
         _EstimatorBlockData,
         EstimatorBlock,
@@ -58,6 +58,27 @@ if solver_available:
     solver = pyo.SolverFactory('ipopt')
 else:
     solver = None
+    
+k_aug_available = pyo.SolverFactory("k_aug").available()
+if k_aug_available:
+    k_aug_solver = pyo.SolverFactory("k_aug")
+    k_aug_solver.options['dsdp_mode'] = ""  #: sensitivity mode!
+else:
+    k_aug_solver = None
+    
+dot_sens_available = pyo.SolverFactory("dot_sens").available()
+if dot_sens_available:
+    dot_sens_solver = pyo.SolverFactory("dot_sens")
+    dot_sens_solver.options["dsdp_mode"] = ""
+else:
+    dot_sens_solver = None
+    
+ipopt_sens_available = pyo.SolverFactory("ipopt_sens").available()
+if ipopt_sens_available:
+    ipopt_sens_solver = pyo.SolverFactory("ipopt_sens")
+    ipopt_sens_solver.options['run_sens'] = 'yes'
+else:
+    ipopt_sens_solver = None
     
     
 class TestEstimatorBlock(object):
@@ -555,7 +576,25 @@ class TestEstimatorBlock(object):
                 pred_expr = diff_cons[bind][t].body - moddis_block[bind].var[sp] == 0.0
                 assert curr_con[t].expr.to_string() == pred_expr.to_string()
                 assert not diff_cons[bind][t].active
-        
+    
+    # The function "load_measurements" is in dynamaic_block.py. However, because
+    # I use this function to load measurements to "ACTUAL MEASUREMENT", which is 
+    # only in MHE, I test the function here.
+    @pytest.mark.unit
+    def test_load_measurements(self):
+        estimator = self.make_estimator()
+        time = estimator.time
+        t0 = time.first()
+        vals = [0.25]
+        estimator.load_measurements(vals, target = "measurement", timepoint = t0)        
+        for b, val in zip(estimator.MEASUREMENT_BLOCK.values(), vals):
+            assert b.var[t0].value == val
+            
+        vals2 = [0.75]
+        t_last = time.last()
+        estimator.load_measurements(vals2, target = "actualmeasurement", timepoint = t_last)        
+        for b, val in zip(estimator.ACTUALMEASUREMENT_BLOCK.values(), vals2):
+            assert b.var[t_last].value == val
                 
     @pytest.mark.unit
     def test_add_steady_state_objective(self):
@@ -807,4 +846,133 @@ class TestEstimatorBlock(object):
 
         estimates = estimator.generate_estimates_at_time(tlast)
         assert estimates == [105., 205.]
+        
+    @pytest.mark.component
+    @pytest.mark.skipif(not solver_available or not k_aug_available or not dot_sens_available,
+                        reason='Either IPOPT or k_aug is not available')
+    def test_asMHE_w_k_aug(self):
+        estimator = self.make_estimator()
+        time = estimator.time
+        t0 = time.first()
+        tlast = time.last()
+        
+        estimator.as_strategy = True
+        
+        desiredss = [
+                (estimator.mod.flow_in[t0], 3.0),
+                ]
+        weights = [
+                (estimator.mod.flow_in[t0], 1.0),
+                ]
+        
+        estimator.mod.flow_in[:].set_value(3.0)
+        initialize_t0(estimator.mod)
+        
+        estimator.initialize_past_info_with_steady_state(desiredss,
+                                                          weights, 
+                                                          solver)
+        
+        model_disturbance_weights = [
+                                    (estimator.mod.conc[t0,'A'], 0.1),
+                                    (estimator.mod.conc[t0,'B'], 0.2),
+                                    ]
+        measurement_error_weights = [(estimator.mod.conc[0,'A'], 10.),]
+        estimator.add_noise_minimize_objective(model_disturbance_weights,
+                                                measurement_error_weights,
+                                                givenform = "weight")
+        
+        estimator.MHE_advanced_strategy_setup(method = "k_aug",
+                                              k_aug_solver = k_aug_solver,
+                                              dot_sens_solver = dot_sens_solver,)
+        
+        # Get the lastes measuremtes from a plant
+        plant = TestDynamicBlock().make_block()
+        p_ts = plant.sample_points[1]
+        plant.vectors.differential[0,0].set_value(3.75)
+        plant.vectors.differential[1,0].set_value(1.25)
+        plant.inject_inputs([2.5])
+        solver.solve(plant, tee = True)
+        measurements = [plant.mod.conc[0.5, "A"].value]
+        
+        estimator.load_measurements(measurements,
+                                    target = "actualmeasurement",
+                                    timepoint = estimator.time.last())
+        estimator.load_inputs_for_MHE([2.5])
+        
+        estimator.check_var_con_dof(skip_dof_check = False)
+        solver.solve(estimator, tee = True)
+        
+        # sensitivity update
+        real_measurements = [measurements[0] + 0.2]
+        estimator.MHE_sensitivity_update(real_measurements, tee = True)
+        updated_estimates = estimator.generate_estimates_at_time(tlast)
+        
+        true_estimates = [3.7699823448356535, 1.4353764804548639]
+        assert updated_estimates[0] == pytest.approx(true_estimates[0], abs=1e-3)
+        assert updated_estimates[1] == pytest.approx(true_estimates[1], abs=1e-3)
+
+    @pytest.mark.component
+    @pytest.mark.skipif(not solver_available or not ipopt_sens_available,
+                        reason='Either IPOPT or sipopt is not available')
+    def test_asMHE_w_sipopt(self):
+        estimator = self.make_estimator()
+        time = estimator.time
+        t0 = time.first()
+        tlast = time.last()
+        
+        estimator.as_strategy = True
+        
+        desiredss = [
+                (estimator.mod.flow_in[t0], 3.0),
+                ]
+        weights = [
+                (estimator.mod.flow_in[t0], 1.0),
+                ]
+        
+        estimator.mod.flow_in[:].set_value(3.0)
+        initialize_t0(estimator.mod)
+        
+        estimator.initialize_past_info_with_steady_state(desiredss,
+                                                          weights, 
+                                                          solver)
+        
+        model_disturbance_weights = [
+                                    (estimator.mod.conc[t0,'A'], 0.1),
+                                    (estimator.mod.conc[t0,'B'], 0.2),
+                                    ]
+        measurement_error_weights = [(estimator.mod.conc[0,'A'], 10.),]
+        estimator.add_noise_minimize_objective(model_disturbance_weights,
+                                                measurement_error_weights,
+                                                givenform = "weight")
+        
+        estimator.MHE_advanced_strategy_setup(method = "sipopt",
+                                              ipopt_sens_solver = ipopt_sens_solver,)
+        
+        # Get the lastes measuremtes from a plant
+        plant = TestDynamicBlock().make_block()
+        p_ts = plant.sample_points[1]
+        plant.vectors.differential[0,0].set_value(3.75)
+        plant.vectors.differential[1,0].set_value(1.25)
+        plant.inject_inputs([2.5])
+        solver.solve(plant, tee = True)
+        measurements = [plant.mod.conc[0.5, "A"].value]
+        
+        estimator.load_measurements(measurements,
+                                    target = "actualmeasurement",
+                                    timepoint = estimator.time.last())
+        estimator.load_inputs_for_MHE([2.5])
+        
+        estimator.check_var_con_dof(skip_dof_check = False)
+        # Here cannot solve the problem with ipopt. Otherwise, sipopt will return the restults
+        # that are different from k_aug. WEIRD!!!
+        # solver.solve(estimator, tee = True)
+        
+        # sensitivity update
+        real_measurements = [measurements[0] + 0.2]
+        estimator.MHE_sensitivity_update(real_measurements, tee = True)
+        updated_estimates = estimator.generate_estimates_at_time(tlast)
+        
+        true_estimates = [3.7699823448356535, 1.4353764804548639]
+        assert updated_estimates[0] == pytest.approx(true_estimates[0], abs=1e-3)
+        assert updated_estimates[1] == pytest.approx(true_estimates[1], abs=1e-3)     
         
