@@ -233,7 +233,8 @@ class PlantDataManager(object):
         self.plantblock = plantblock
 
         if user_interested_states is None:
-            self.plant_user_interested_states = []
+            user_interested_states = []
+        self.plant_user_interested_states = user_interested_states
         self.plant_states_of_interest = find_and_merge_variables(
                                                     plantblock,
                                                     self.plantblock.differential_vars,
