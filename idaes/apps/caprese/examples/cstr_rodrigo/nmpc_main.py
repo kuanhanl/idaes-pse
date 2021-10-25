@@ -175,7 +175,7 @@ def run_iterations(nmpc,
                    plant_data,
                    controller_data,
                    iterations = 10,
-                   has_noise = True,
+                   noise_info = None,
                    plot_results = True):
 
     p_t0 = nmpc.plant.time.first()
@@ -183,8 +183,7 @@ def run_iterations(nmpc,
     p_ts = nmpc.plant.sample_points[1]
     c_ts = nmpc.controller.sample_points[1]
 
-    if has_noise:
-        noise_info = setup_noise(nmpc)
+    if noise_info is not None:
         random.seed(246)
 
     for i in range(1, iterations +1):
@@ -192,7 +191,7 @@ def run_iterations(nmpc,
         measured = nmpc.plant.generate_measurements_at_time(p_ts)
         nmpc.plant.advance_one_sample()
         nmpc.plant.initialize_to_initial_conditions()
-        if has_noise:
+        if noise_info is not None:
             measured = apply_noise_with_bounds(
                     measured,
                     noise_info["measurement_variance"],
@@ -207,7 +206,7 @@ def run_iterations(nmpc,
         controller_data.save_controller_data(iteration = i)
 
         inputs = nmpc.controller.generate_inputs_at_time(c_ts)
-        if has_noise:
+        if noise_info is not None:
             inputs = apply_noise_with_bounds(
                     inputs,
                     noise_info["input_variance"],
@@ -239,10 +238,11 @@ if __name__ == '__main__':
                                     nmpc,
                                     plant_data,
                                     controller_data)
+    noise_info = setup_noise(nmpc)
     nmpc, plant_data, controller_data = run_iterations(
                                     nmpc,
                                     plant_data,
                                     controller_data,
                                     iterations = 10,
-                                    has_noise = True,
+                                    noise_info = noise_info,
                                     plot_results = True)
