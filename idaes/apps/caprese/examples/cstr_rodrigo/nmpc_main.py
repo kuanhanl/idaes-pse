@@ -12,7 +12,6 @@
 ##############################################################################
 """
 Example for Caprese's module for NMPC.
-Main script for running the example.
 """
 import random
 from idaes.apps.caprese.dynamic_builder import DynamicSim
