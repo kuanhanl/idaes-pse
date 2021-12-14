@@ -42,10 +42,22 @@ if SolverFactory('ipopt').available():
 else:
     solver = None
 
-def setup_controller():
-    m_controller = make_model(horizon=10, ntfe=5, ntcp=2, bounds=True)
-    sample_time = 2.
-    m_plant = make_model(horizon=sample_time, ntfe=2, ntcp=2, bounds = True)
+def setup_controller(nmpc_horizon=10,
+                     nmpc_ntfe=5,
+                     nmpc_ntcp=2,
+                     plant_ntfe=2,
+                     plant_ntcp=2,
+                     sample_time=2.0):
+
+    m_controller = make_model(horizon=nmpc_horizon,
+                              ntfe=nmpc_ntfe,
+                              ntcp=nmpc_ntcp,
+                              bounds=True)
+
+    m_plant = make_model(horizon=sample_time,
+                         ntfe=plant_ntfe,
+                         ntcp=plant_ntcp,
+                         bounds = True)
     time_plant = m_plant.t
 
     # We must identify for the controller which variables are our
@@ -232,16 +244,24 @@ def run_iterations(nmpc,
     return nmpc, plant_data, controller_data
 
 if __name__ == '__main__':
-    nmpc, plant_data, controller_data = setup_controller()
+    nmpc, plant_data, controller_data = setup_controller(
+                                        nmpc_horizon=10,
+                                        nmpc_ntfe=5,
+                                        nmpc_ntcp=2,
+                                        plant_ntfe=2,
+                                        plant_ntcp=2,
+                                        sample_time=2.0
+                                        )
     nmpc, plant_data, controller_data = solve_first_control_NLP(
-                                    nmpc,
-                                    plant_data,
-                                    controller_data)
+                                        nmpc,
+                                        plant_data,
+                                        controller_data
+                                        )
     noise_info = setup_noise(nmpc)
     nmpc, plant_data, controller_data = run_iterations(
-                                    nmpc,
-                                    plant_data,
-                                    controller_data,
-                                    iterations = 10,
-                                    noise_info = noise_info,
-                                    plot_results = True)
+                                        nmpc,
+                                        plant_data,
+                                        controller_data,
+                                        iterations = 10,
+                                        noise_info = noise_info,
+                                        plot_results = True)
