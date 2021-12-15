@@ -58,7 +58,6 @@ def setup_controller(nmpc_horizon=10,
                          ntfe=plant_ntfe,
                          ntcp=plant_ntcp,
                          bounds = True)
-    time_plant = m_plant.t
 
     # We must identify for the controller which variables are our
     # inputs and measurements.
