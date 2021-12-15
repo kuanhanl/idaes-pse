@@ -261,6 +261,6 @@ if __name__ == '__main__':
                                         nmpc,
                                         plant_data,
                                         controller_data,
-                                        iterations = 10,
-                                        noise_info = noise_info,
-                                        plot_results = True)
+                                        iterations=10,
+                                        noise_info=noise_info,
+                                        plot_results=True)
