@@ -96,14 +96,14 @@ def setup_estimator(mhe_horizon=10,
 
     # Now we are ready to construct the objective function for MHE
     model_disturbance_weights = [
-            (estimator.mod.Ca[0], 1.),
-            (estimator.mod.Tall[0, "T"], 1.),
-            (estimator.mod.Tall[0, "Tj"], 1.),
+            (estimator.mod.Ca, 1.),
+            (Reference(estimator.mod.Tall[:, "T"]), 1.),
+            (Reference(estimator.mod.Tall[:, "Tj"]), 1.),
             ]
 
     measurement_noise_weights = [
-            (estimator.mod.Ca[0], 100.),
-            (estimator.mod.Tall[0, "T"], 20.),
+            (estimator.mod.Ca, 100.),
+            (Reference(estimator.mod.Tall[:, "T"]), 20.),
             ]
 
     mhe.estimator.add_noise_minimize_objective(model_disturbance_weights,
