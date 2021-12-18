@@ -169,7 +169,7 @@ def setup_controller_estimator(nmpc_horizon=10,
 
     return dyna, plant_data, controller_data, estimator_data
 
-def solve_first_control_estimator_NLP(dyna,
+def solve_first_control_estimation_NLP(dyna,
                                       plant_data,
                                       controller_data,
                                       estimator_data):
