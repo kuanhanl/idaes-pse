@@ -63,7 +63,7 @@ def setup_estimator(mhe_horizon=10,
             ]
     measurements = [
             Reference(m_plant.Tall[:, "T"]),
-            # m_plant.Tall[0, "Tj"],
+            # Reference(m_plant.Tall[:, "Tj"]),
             m_plant.Ca,
             ]
 
@@ -73,9 +73,7 @@ def setup_estimator(mhe_horizon=10,
             plant_time_set=m_plant.t,
             estimator_model=m_estimator,
             estimator_time_set=m_estimator.t,
-            # inputs_at_t0=inputs,
             inputs_as_indexedvar=inputs,
-            # measurements_at_t0=measurements,
             measurements_as_indexedvar=measurements,
             sample_time=sample_time,
             )

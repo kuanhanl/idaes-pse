@@ -78,7 +78,7 @@ def setup_controller_estimator(nmpc_horizon=10,
             ]
     measurements = [
             Reference(m_plant.Tall[:, "T"]),
-            # m_plant.Tall[0, "Tj"],
+            # Reference(m_plant.Tall[:, "Tj"]),
             m_plant.Ca,
             ]
 
@@ -90,9 +90,7 @@ def setup_controller_estimator(nmpc_horizon=10,
             estimator_time_set = m_estimator.t,
             controller_model = m_controller,
             controller_time_set = m_controller.t,
-            # inputs_at_t0 = inputs,
             inputs_as_indexedvar = inputs,
-            # measurements_at_t0 = measurements,
             measurements_as_indexedvar = measurements,
             sample_time = sample_time,
             )

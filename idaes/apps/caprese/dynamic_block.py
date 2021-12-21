@@ -452,11 +452,6 @@ class _DynamicBlockData(_BlockData):
                      weight for each variable's term in the objective.
 
         """
-        # vardata_map = self.vardata_map
-        # for vardata, weight in weights:
-        #     nmpc_var = vardata_map[vardata]
-        #     nmpc_var.weight = weight
-
         vardata_map = self.vardata_map
         for var, weight in weights:
             index_set = var.index_set()
@@ -466,14 +461,6 @@ class _DynamicBlockData(_BlockData):
                                    "is not or not only indexed by time")
             nmpc_var = vardata_map[var[index_set.first()]]
             nmpc_var.weight = weight
-
-        # weight_vector = []
-        # for vardata, sp in setpoint:
-        #     nmpc_var = vardata_map[vardata]
-        #     if nmpc_var.weight is None:
-        #         self.logger.warning('Weight not supplied for %s' % var.name)
-        #         nmpc_var.weight = 1.0
-        #     weight_vector.append(nmpc_var.weight)
 
         weight_vector = []
         for var, sp in setpoint:
@@ -487,11 +474,6 @@ class _DynamicBlockData(_BlockData):
                 self.logger.warning('Weight not supplied for %s' % var.name)
                 nmpc_var.weight = 1.0
             weight_vector.append(nmpc_var.weight)
-
-        # obj_expr = sum(
-        #     weight_vector[i]*(var - sp)**2 for
-        #     i, (var, sp) in enumerate(setpoint))
-        # self.single_time_optimization_objective = Objective(expr=obj_expr)
 
         obj_expr = sum(
             weight_vector[i]*(var[var.index_set().first()] - sp)**2 for
@@ -792,19 +774,6 @@ class _DynamicBlockData(_BlockData):
                            correspond to time-indexed references, and values
                            are the variances.
         """
-        # t0 = self.time.first()
-        # variance_map = ComponentMap(variance_list)
-        # for var, val in variance_list:
-        #     nmpc_var = self.vardata_map[var]
-        #     nmpc_var.variance = val
-        # # MeasurementVars will not have their variance set since they are
-        # # not mapped to in vardata_map
-        # for var in self.component_objects(MeasuredVar):
-        #     # component_objects is fine here because we don't need
-        #     # to access measurements in any particular order.
-        #     if var[t0] in variance_map:
-        #         var.variance = variance_map[var[t0]]
-
         t0 = self.time.first()
         variance_map = ComponentMap((var[t0], val)
                                      for var, val in variance_list)
