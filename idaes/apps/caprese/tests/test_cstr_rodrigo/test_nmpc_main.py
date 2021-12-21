@@ -10,7 +10,7 @@
 # Please see the files COPYRIGHT.md and LICENSE.md for full copyright and
 # license information.
 #################################################################################
-""" Tests for the estimator model subclass of block
+""" Tests for the example of NMPC for Rodrigo's cstr
 """
 
 import pytest
@@ -39,6 +39,20 @@ class TestNMPCMain(object):
                                                              plant_ntfe=2,
                                                              plant_ntcp=2,
                                                              sample_time=2.0)
+
+        pmod = nmpc.plant.mod
+        var_value_dict = {"Ca[0]": 0.0192,
+                           "k[0]": 1596.67471,
+                           "Tjinb[0]": 250.0,
+                           "Tall[0,T]": 384.0,
+                           "Tall[0,Tj]": 371.0,
+                           }
+        for varstr_t0 in var_value_dict.keys():
+            cuid = pyo.ComponentUID(varstr_t0)
+            comp = cuid.find_component_on(pmod)
+            assert comp.value == pytest.approx(var_value_dict[varstr_t0],
+                                               1e-3,
+                                               )
 
         cmod = nmpc.controller.mod
         var_value_dict = {"Ca[*]": 0.0192,

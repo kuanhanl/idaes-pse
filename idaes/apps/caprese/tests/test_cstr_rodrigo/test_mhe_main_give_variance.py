@@ -10,13 +10,13 @@
 # Please see the files COPYRIGHT.md and LICENSE.md for full copyright and
 # license information.
 #################################################################################
-""" Tests for the example of MHE for Rodrigo's cstr
+""" Tests for the example of MHE for Rodrigo's cstr with given variances
 """
 
 import pytest
 import pyomo.environ as pyo
 
-from idaes.apps.caprese.examples.cstr_rodrigo.mhe_main import (
+from idaes.apps.caprese.examples.cstr_rodrigo.mhe_main_give_variance import (
             setup_estimator,
             solve_first_esitmation_NLP,
             run_iterations,
