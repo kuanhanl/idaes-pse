@@ -136,9 +136,9 @@ if __name__ == '__main__':
                                                     sample_time=2.0)
 
     simulator, data_manager = solve_first_simulation_NLP(simulator,
-                                                         data_manager)
+                                                          data_manager)
 
     simulator, data_manager = run_iterations(simulator,
-                                             data_manager,
-                                             iterations=10,
-                                             plot_results = True)
+                                              data_manager,
+                                              iterations=10,
+                                              plot_results=True)
