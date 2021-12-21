@@ -10,7 +10,7 @@
 # Please see the files COPYRIGHT.md and LICENSE.md for full copyright and
 # license information.
 #################################################################################
-""" Tests for the estimator model subclass of block
+""" Tests for the example of MHE for Rodrigo's cstr
 """
 
 import pytest

@@ -10,7 +10,7 @@
 # Please see the files COPYRIGHT.md and LICENSE.md for full copyright and
 # license information.
 #################################################################################
-""" Tests for the estimator model subclass of block
+""" Tests for the example of MHE for Rodrigo's cstr with given variances
 """
 
 import pytest
@@ -86,7 +86,7 @@ class TestMHEMain(object):
         assert type(estimator_data) is EstimatorDataManager
 
     @pytest.mark.component
-    def test_solve_first_control_NLP(self):
+    def test_solve_first_estimation_NLP(self):
         mhe, plant_data, estimator_data = setup_estimator(
                                             mhe_horizon=10,
                                             mhe_ntfe=10,
